@@ -1,0 +1,4 @@
+.git
+target/
+.clj-kondo/
+.cpcache/

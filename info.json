@@ -1,0 +1,7 @@
+{
+  "participants": ["Júlia Tamagno"],
+  "social": ["https://github.com/jutamagno"],
+  "source-code-repo": "https://github.com/jutamagno/rinha-de-backend-2026-clojure",
+  "stack": ["clojure", "graalvm-native", "http-kit", "nginx"],
+  "open_to_work": false
+}
