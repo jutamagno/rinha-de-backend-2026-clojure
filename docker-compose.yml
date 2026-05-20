@@ -17,7 +17,7 @@ services:
           memory: "20MB"
 
   api1:
-    image: jutamagno/rinha-2026-clojure:latest
+    image: tamagno/rinha-2026-clojure:latest
     environment:
       PORT: "3000"
       INDEX_PATH: "/data/index.bin"
@@ -28,7 +28,7 @@ services:
           memory: "165MB"
 
   api2:
-    image: jutamagno/rinha-2026-clojure:latest
+    image: tamagno/rinha-2026-clojure:latest
     environment:
       PORT: "3000"
       INDEX_PATH: "/data/index.bin"
