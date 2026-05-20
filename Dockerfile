@@ -98,4 +98,4 @@ ENV PORT=3000
 ENV INDEX_PATH=/data/index.bin
 
 EXPOSE 3000
-ENTRYPOINT ["/rinha-server", "-Xmx160m"]
+ENTRYPOINT ["/rinha-server"]

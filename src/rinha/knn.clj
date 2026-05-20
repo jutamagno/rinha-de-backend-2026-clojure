@@ -2,7 +2,7 @@
   (:require [rinha.dataset :as ds]))
 
 (def ^:const k      5)   ; k-NN neighbours
-(def ^:const nprobe 10)  ; clusters to search per query
+(def ^:const nprobe 6)   ; clusters to search per query
 
 ;; ─── Centroid selection ───────────────────────────────────────────────────────
 
