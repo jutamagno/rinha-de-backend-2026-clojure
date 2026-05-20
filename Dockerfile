@@ -27,6 +27,7 @@ RUN apk add --no-cache bash curl rlwrap && \
 COPY deps.edn build.clj ./
 RUN clojure -P && clojure -P -T:build
 
+ARG CACHEBUST=1
 COPY src/       src/
 COPY resources/ resources/
 
@@ -81,6 +82,7 @@ RUN set -e; \
 
 RUN native-image \
     --features=rinha.ClojureFeature \
+    --initialize-at-build-time=clojure,rinha,cheshire,com.fasterxml.jackson,org.httpkit \
     -H:ConfigurationFileDirectories=/build/graal-config \
     -jar /build/rinha.jar \
     -o /build/rinha-server
@@ -96,4 +98,4 @@ ENV PORT=3000
 ENV INDEX_PATH=/data/index.bin
 
 EXPOSE 3000
-ENTRYPOINT ["/rinha-server"]
+ENTRYPOINT ["/rinha-server", "-Xmx160m"]

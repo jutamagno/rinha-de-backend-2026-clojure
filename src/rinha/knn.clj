@@ -1,71 +1,89 @@
 (ns rinha.knn
   (:require [rinha.dataset :as ds]))
 
-(def ^:const k 5)
+(def ^:const k      5)   ; k-NN neighbours
+(def ^:const nprobe 10)  ; clusters to search per query
 
-(defn- dist-sq
-  [^ints q ^shorts data base]
-  (let [base (long base)]
+;; ─── Centroid selection ───────────────────────────────────────────────────────
+
+(defn- centroid-dist ^long [^ints q ^shorts centroids ^long k-idx]
+  (let [base (* k-idx 14)]
     (loop [j 0 acc 0]
       (if (= j 14)
         acc
-        (let [d (- (aget q j) (long (aget data (unchecked-add base j))))]
-          (recur (unchecked-inc j) (unchecked-add acc (unchecked-multiply d d))))))))
+        (let [d (- (long (aget q j)) (long (aget centroids (+ base j))))]
+          (recur (inc j) (unchecked-add acc (unchecked-multiply d d))))))))
 
-(defn- find-max-idx
-  [^longs arr]
-  (loop [m 1 mi 0]
-    (if (= m k)
-      mi
-      (recur (unchecked-inc m)
-             (if (> (aget arr m) (aget arr mi)) m mi)))))
+(defn- top-clusters
+  "Returns int[] of the nprobe nearest centroid indices."
+  ^ints [^ints q ^shorts centroids K]
+  (let [dists  (long-array K)
+        result (int-array nprobe)
+        used   (boolean-array K)]
+    (dotimes [ci K]
+      (aset dists ci (centroid-dist q centroids ci)))
+    (dotimes [p nprobe]
+      (loop [ci 0  best 0  best-d Long/MAX_VALUE]
+        (if (= ci K)
+          (do (aset result p best)
+              (aset used best true))
+          (let [d (aget dists ci)]
+            (if (and (not (aget used ci)) (< d best-d))
+              (recur (inc ci) ci d)
+              (recur (inc ci) best best-d))))))
+    result))
 
-(defn- search-range
-  [^ints q ^shorts vectors ^bytes labels start end]
-  (let [start     (long start)
-        end       (long end)
+;; ─── Cluster search ───────────────────────────────────────────────────────────
+
+(defn- search-cluster
+  "Scans vectors[start..end) updating best-dist/best-lbl. Returns new worst dist."
+  [^ints q ^shorts vectors ^bytes labels
+   start end
+   ^longs best-dist ^bytes best-lbl worst-dist]
+  (loop [i (long start)  wd (long worst-dist)]
+    (if (= i end)
+      wd
+      (let [base (* i 14)
+            d    (loop [j 0 acc 0]
+                   (if (= j 14)
+                     acc
+                     (let [diff (- (long (aget q j)) (long (aget vectors (+ base j))))]
+                       (recur (inc j) (unchecked-add acc (unchecked-multiply diff diff))))))]
+        (if (< d wd)
+          (let [mi (loop [m 1 best-m 0]
+                     (if (= m k)
+                       best-m
+                       (recur (inc m)
+                              (if (> (aget best-dist m) (aget best-dist best-m)) m best-m))))]
+            (aset best-dist mi d)
+            (aset best-lbl  mi (aget labels i))
+            (recur (inc i)
+                   (loop [m 1 w (aget best-dist 0)]
+                     (if (= m k) w
+                       (recur (inc m) (if (> (aget best-dist m) w) (aget best-dist m) w))))))
+          (recur (inc i) wd))))))
+
+;; ─── Public API ──────────────────────────────────────────────────────────────
+
+(defn fraud-count [^ints q-vec]
+  (let [st        @ds/state
+        centroids ^shorts (:centroids st)
+        vectors   ^shorts (:vectors st)
+        labels    ^bytes  (:labels st)
+        cl-starts ^ints   (:cl-starts st)
+        cl-sizes  ^ints   (:cl-sizes st)
+        K         (long (:k st))
+        top       (top-clusters q-vec centroids K)
         best-dist (long-array k Long/MAX_VALUE)
-        best-lbl  (byte-array k)
-        worst     (volatile! Long/MAX_VALUE)]
-    (loop [i start]
-      (when (< i end)
-        (let [d (long (dist-sq q vectors (* i 14)))]
-          (when (< d (long @worst))
-            (let [mi (find-max-idx best-dist)]
-              (aset best-dist mi d)
-              (aset best-lbl  mi (aget labels i))
-              (vreset! worst (aget best-dist (find-max-idx best-dist))))))
-        (recur (unchecked-inc i))))
-    [best-dist best-lbl]))
-
-(defn- merge-results
-  [[d1 l1] [d2 l2]]
-  (let [^longs d1   d1
-        ^bytes l1   l1
-        ^longs d2   d2
-        ^bytes l2   l2
-        best-dist   (long-array k Long/MAX_VALUE)
-        best-lbl    (byte-array k)]
-    (doseq [[d lbl] (concat (map vector d1 l1) (map vector d2 l2))]
-      (let [d  (long d)
-            mi (find-max-idx best-dist)]
-        (when (< d (aget best-dist mi))
-          (aset best-dist mi d)
-          (aset best-lbl  mi (unchecked-byte lbl)))))
-    [best-dist best-lbl]))
-
-(defn fraud-count
-  [^ints q-vec]
-  (let [st       @ds/state
-        ^shorts  vectors (:vectors st)
-        ^bytes   labels  (:labels st)
-        n        (long (:n st))
-        mid      (quot n 2)
-        f1       (future (search-range q-vec vectors labels 0 mid))
-        r2       (search-range q-vec vectors labels mid n)
-        [_ bl]   (merge-results @f1 r2)
-        ^bytes   best-lbl bl]
+        best-lbl  (byte-array k)]
+    (loop [p 0  wd Long/MAX_VALUE]
+      (when (< p nprobe)
+        (let [ci    (aget top p)
+              start (long (aget cl-starts ci))
+              end   (+ start (long (aget cl-sizes ci)))
+              new-wd (search-cluster q-vec vectors labels start end best-dist best-lbl wd)]
+          (recur (inc p) new-wd))))
     (loop [i 0 cnt 0]
       (if (= i k)
         cnt
-        (recur (inc i) (+ cnt (if (= 1 (aget best-lbl i)) 1 0)))))))
+        (recur (inc i) (if (= 1 (aget best-lbl i)) (inc cnt) cnt))))))
