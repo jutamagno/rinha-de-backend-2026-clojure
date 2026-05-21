@@ -53,7 +53,7 @@
 
 ;; ─── KD-tree build ────────────────────────────────────────────────────────────
 
-(defn- ^long left-subtree-size [^long n]
+(defn- left-subtree-size [^long n]
   (if (<= n 1)
     0
     (let [h         (- 63 (Long/numberOfLeadingZeros n))  ; floor(log2 n)
@@ -125,7 +125,7 @@
                 pos   (long (aget stk (int (+ b 2))))
                 depth (long (aget stk (int (+ b 3))))
                 n     (- hi lo -1)
-                lsz   (left-subtree-size n)
+                lsz   (long (left-subtree-size n))
                 mid   (+ lo lsz)
                 dim   (mod depth DIMS)]
             (quickselect! indices raw-vecs lo hi mid dim)
