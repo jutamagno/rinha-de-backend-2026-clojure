@@ -1,8 +1,15 @@
 package rinha;
 
 public final class KDTree {
-    private static final int  DIMS = 14;
-    private static final int  K    = 5;
+    private static final int  DIMS       = 14;
+    private static final int  K          = 5;
+    // 14D KD-tree visits O(N^(13/14)) nodes exactly — nearly brute force.
+    // Capping visits trades a tiny accuracy loss for orders-of-magnitude speedup.
+    // 14D KD-tree visits O(N^(13/14)) nodes exactly — nearly brute force.
+    // Capping visits trades a tiny accuracy loss for orders-of-magnitude speedup.
+    // Max stack depth = 1 + MAX_VISITS (each visit pops 1 and pushes ≤2).
+    private static final int  MAX_VISITS = 10_000;
+    private static final int  STACK_SIZE = 16_384; // > MAX_VISITS + 1
 
     /**
      * Returns the fraud count among the K nearest neighbours.
@@ -15,24 +22,25 @@ public final class KDTree {
         byte[] bestLbl  = new byte[K];
         long   worst    = Long.MAX_VALUE;
 
-        // Explicit DFS stack — max depth ≈22, max stack entries ≈44
-        int[]  sPos   = new int[64];
-        int[]  sDepth = new int[64];
-        long[] sDim2  = new long[64];
+        int[]  sPos   = new int[STACK_SIZE];
+        int[]  sDepth = new int[STACK_SIZE];
+        long[] sDim2  = new long[STACK_SIZE];
         int    top    = 0;
+        int    visits = 0;
 
         sPos[0]   = 0;
         sDepth[0] = 0;
         sDim2[0]  = 0L;
         top = 1;
 
-        while (top > 0) {
+        while (top > 0 && visits < MAX_VISITS) {
             top--;
             int  pos   = sPos[top];
             int  depth = sDepth[top];
             long dim2  = sDim2[top];
 
             if (pos >= N || dim2 >= worst) continue;
+            visits++;
 
             // Distance to this node (early-exit if already >= worst)
             int  base = pos * DIMS;

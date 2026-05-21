@@ -35,49 +35,53 @@
           (case (.getCurrentName jp)
 
             "transaction"
-            (loop []
-              (when (= (.nextToken jp) JsonToken/FIELD_NAME)
-                (case (.getCurrentName jp)
-                  "amount"       (do (.nextToken jp) (aset tx-amount       0 (.getDoubleValue jp)))
-                  "installments" (do (.nextToken jp) (aset tx-installments 0 (.getLongValue jp)))
-                  "requested_at" (do (.nextToken jp) (aset tx-req-at       0 (.getText jp)))
-                  (do (.nextToken jp) (.skipChildren jp)))
-                (recur)))
+            (do (.nextToken jp) ; START_OBJECT
+                (loop []
+                  (when (= (.nextToken jp) JsonToken/FIELD_NAME)
+                    (case (.getCurrentName jp)
+                      "amount"       (do (.nextToken jp) (aset tx-amount       0 (.getDoubleValue jp)))
+                      "installments" (do (.nextToken jp) (aset tx-installments 0 (.getLongValue jp)))
+                      "requested_at" (do (.nextToken jp) (aset tx-req-at       0 (.getText jp)))
+                      (do (.nextToken jp) (.skipChildren jp)))
+                    (recur))))
 
             "customer"
-            (loop []
-              (when (= (.nextToken jp) JsonToken/FIELD_NAME)
-                (case (.getCurrentName jp)
-                  "avg_amount"   (do (.nextToken jp) (aset cust-avg   0 (.getDoubleValue jp)))
-                  "tx_count_24h" (do (.nextToken jp) (aset cust-count 0 (.getLongValue jp)))
-                  "known_merchants"
-                  (do (.nextToken jp) ; START_ARRAY
-                      (loop []
-                        (when (= (.nextToken jp) JsonToken/VALUE_STRING)
-                          (.add cust-mercs (.getText jp))
-                          (recur))))
-                  (do (.nextToken jp) (.skipChildren jp)))
-                (recur)))
+            (do (.nextToken jp) ; START_OBJECT
+                (loop []
+                  (when (= (.nextToken jp) JsonToken/FIELD_NAME)
+                    (case (.getCurrentName jp)
+                      "avg_amount"   (do (.nextToken jp) (aset cust-avg   0 (.getDoubleValue jp)))
+                      "tx_count_24h" (do (.nextToken jp) (aset cust-count 0 (.getLongValue jp)))
+                      "known_merchants"
+                      (do (.nextToken jp) ; START_ARRAY
+                          (loop []
+                            (when (= (.nextToken jp) JsonToken/VALUE_STRING)
+                              (.add cust-mercs (.getText jp))
+                              (recur))))
+                      (do (.nextToken jp) (.skipChildren jp)))
+                    (recur))))
 
             "merchant"
-            (loop []
-              (when (= (.nextToken jp) JsonToken/FIELD_NAME)
-                (case (.getCurrentName jp)
-                  "id"         (do (.nextToken jp) (aset merc-id  0 (.getText jp)))
-                  "mcc"        (do (.nextToken jp) (aset merc-mcc 0 (.getText jp)))
-                  "avg_amount" (do (.nextToken jp) (aset merc-avg 0 (.getDoubleValue jp)))
-                  (do (.nextToken jp) (.skipChildren jp)))
-                (recur)))
+            (do (.nextToken jp) ; START_OBJECT
+                (loop []
+                  (when (= (.nextToken jp) JsonToken/FIELD_NAME)
+                    (case (.getCurrentName jp)
+                      "id"         (do (.nextToken jp) (aset merc-id  0 (.getText jp)))
+                      "mcc"        (do (.nextToken jp) (aset merc-mcc 0 (.getText jp)))
+                      "avg_amount" (do (.nextToken jp) (aset merc-avg 0 (.getDoubleValue jp)))
+                      (do (.nextToken jp) (.skipChildren jp)))
+                    (recur))))
 
             "terminal"
-            (loop []
-              (when (= (.nextToken jp) JsonToken/FIELD_NAME)
-                (case (.getCurrentName jp)
-                  "is_online"    (do (.nextToken jp) (aset term-online  0 (.getBooleanValue jp)))
-                  "card_present" (do (.nextToken jp) (aset term-present 0 (.getBooleanValue jp)))
-                  "km_from_home" (do (.nextToken jp) (aset term-km      0 (.getDoubleValue jp)))
-                  (do (.nextToken jp) (.skipChildren jp)))
-                (recur)))
+            (do (.nextToken jp) ; START_OBJECT
+                (loop []
+                  (when (= (.nextToken jp) JsonToken/FIELD_NAME)
+                    (case (.getCurrentName jp)
+                      "is_online"    (do (.nextToken jp) (aset term-online  0 (.getBooleanValue jp)))
+                      "card_present" (do (.nextToken jp) (aset term-present 0 (.getBooleanValue jp)))
+                      "km_from_home" (do (.nextToken jp) (aset term-km      0 (.getDoubleValue jp)))
+                      (do (.nextToken jp) (.skipChildren jp)))
+                    (recur))))
 
             "last_transaction"
             (do (.nextToken jp) ; START_OBJECT or VALUE_NULL
