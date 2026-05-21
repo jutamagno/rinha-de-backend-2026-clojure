@@ -1,9 +1,8 @@
 (ns rinha.server
   (:require [org.httpkit.server :as hk]
-            [cheshire.core :as json]
             [rinha.dataset :as ds]
             [rinha.knn :as knn]
-            [rinha.vectorizer :as vec]))
+            [rinha.parser :as parser]))
 
 (defonce *server (atom nil))
 
@@ -16,17 +15,14 @@
 
     "/fraud-score"
     (try
-      (let [tx         (json/parse-string (slurp (:body req)) true)
-            q-vec      (vec/vectorize tx)
-            fraud-cnt  (knn/fraud-count q-vec)
-            score      (/ fraud-cnt 5.0)]
+      (let [q-vec     (parser/parse-and-vectorize! (:body req))
+            fraud-cnt (knn/fraud-count q-vec)
+            score     (/ (double fraud-cnt) 5.0)
+            approved  (<= score 0.2)]
         {:status  200
          :headers {"Content-Type" "application/json"}
-         :body    (json/generate-string
-                    {:approved    (<= score 0.2)
-                     :fraud_score (double score)})})
+         :body    (str "{\"approved\":" approved ",\"fraud_score\":" score "}")})
       (catch Exception _
-        ;; Retorna aprovado como fallback (peso FP=1 < peso Err=5)
         {:status  200
          :headers {"Content-Type" "application/json"}
          :body    "{\"approved\":true,\"fraud_score\":0.0}"}))

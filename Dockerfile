@@ -83,7 +83,7 @@ RUN set -e; \
 
 RUN native-image \
     --features=rinha.ClojureFeature \
-    --initialize-at-build-time=clojure,rinha,cheshire,com.fasterxml.jackson,org.httpkit \
+    --initialize-at-build-time=clojure,rinha,com.fasterxml.jackson,org.httpkit \
     -H:ConfigurationFileDirectories=/build/graal-config \
     -jar /build/rinha.jar \
     -o /build/rinha-server

@@ -103,3 +103,45 @@
        (if (.contains known-mercs merc-id) 0 32767)
        (encode (get mcc-risk mcc 0.5))
        (encode (clamp (/ merc-avg max-merchant-avg)))])))
+
+(defn vectorize*
+  "Takes extracted field values directly — called from the streaming JSON parser.
+   Avoids all intermediate map and keyword allocation on the hot path."
+  [amount installments ^String req-at
+   avg-amount tx-count-24h ^java.util.Collection known-mercs
+   ^String merc-id ^String mcc merc-avg
+   is-online card-present km-home
+   last-ts last-km-from-current]
+  (let [amount       (double amount)
+        installments (long   installments)
+        avg-amount   (double avg-amount)
+        tx-count-24h (long   tx-count-24h)
+        merc-avg     (double merc-avg)
+        km-home      (double km-home)
+        last-km      (double last-km-from-current)
+        req-days     (ts-days req-at)
+        hour         (d2 req-at 11)
+        dow          (mod (+ req-days 3) 7)
+        dim5         (if last-ts
+                       (encode (clamp (/ (- (ts-epoch-sec req-at)
+                                           (ts-epoch-sec ^String last-ts))
+                                        (* 60.0 max-minutes))))
+                       sentinel-short)
+        dim6         (if last-ts
+                       (encode (clamp (/ last-km max-km)))
+                       sentinel-short)]
+    (int-array
+      [(encode (clamp (/ amount max-amount)))
+       (encode (clamp (/ (double installments) max-installments)))
+       (encode (clamp (/ (/ amount avg-amount) amount-vs-avg-ratio)))
+       (encode (/ (double hour) 23.0))
+       (encode (/ (double dow) 6.0))
+       dim5
+       dim6
+       (encode (clamp (/ km-home max-km)))
+       (encode (clamp (/ (double tx-count-24h) max-tx-count-24h)))
+       (if is-online    32767 0)
+       (if card-present 32767 0)
+       (if (.contains known-mercs merc-id) 0 32767)
+       (encode (get mcc-risk mcc 0.5))
+       (encode (clamp (/ merc-avg max-merchant-avg)))])))

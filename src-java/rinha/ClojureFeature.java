@@ -16,10 +16,10 @@ public class ClojureFeature implements Feature {
             // calls <clinit> directly without Clojure's loading context, which fails
             // for most Clojure sub-namespaces. Loading via RT.load uses the proper
             // Clojure mechanism, so GraalVM's later force-init checks find them done.
-            rt.getMethod("load", String.class).invoke(null, "cheshire/core");
             // httpkit must be loaded before rinha/core so requiring-resolve in
             // rinha.server finds the namespace already loaded at runtime.
             rt.getMethod("load", String.class).invoke(null, "org/httpkit/server");
+            rt.getMethod("load", String.class).invoke(null, "rinha/parser");
             rt.getMethod("load", String.class).invoke(null, "rinha/core");
         } catch (Exception e) {
             throw new RuntimeException(e);
