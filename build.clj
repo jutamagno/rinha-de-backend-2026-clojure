@@ -9,9 +9,9 @@
   (b/delete {:path "target"})
   (b/copy-dir {:src-dirs   ["src" "resources"]
                :target-dir class-dir})
-  (b/javac {:src-dirs  ["src-java"]
-            :class-dir class-dir
-            :basis     basis})
+  ;; Compile only KDTree.java (ClojureFeature.java has GraalVM-only imports
+  ;; and is compiled separately in the native-image stage)
+  (b/process {:command-args ["javac" "-d" class-dir "src-java/rinha/KDTree.java"]})
   (b/compile-clj {:basis       basis
                   :src-dirs    ["src"]
                   :class-dir   class-dir

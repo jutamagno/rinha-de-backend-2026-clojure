@@ -24,12 +24,19 @@
       (let [N    (.readInt dis)
             _    (println "  N=" N)
             _    (println "  Lendo vetores (" (quot (* N 14 2) 1048576) " MB)...")
-            raw  (byte-array (* N 14 2))
-            _    (.readFully dis raw)
-            buf  (doto (ByteBuffer/wrap raw)
-                   (.order ByteOrder/BIG_ENDIAN))
-            vecs (short-array (* N 14))
-            _    (.get (.asShortBuffer buf) vecs)
+            ;; Read in 128 KB chunks to avoid allocating a 84 MB temp byte array
+            vecs    (short-array (* N 14))
+            chunk   65536  ; shorts per chunk
+            raw-buf (byte-array (* chunk 2))
+            _       (loop [pos 0 rem (* N 14)]
+                      (when (pos? rem)
+                        (let [n-sh (min chunk (int rem))
+                              n-by (* n-sh 2)]
+                          (.readFully dis raw-buf 0 n-by)
+                          (let [bb (doto (ByteBuffer/wrap raw-buf 0 n-by)
+                                     (.order ByteOrder/BIG_ENDIAN))]
+                            (.get (.asShortBuffer bb) vecs pos n-sh))
+                          (recur (+ pos n-sh) (- rem n-sh)))))
             lbls (byte-array N)
             _    (.readFully dis lbls)]
         (reset! state {:vectors vecs
