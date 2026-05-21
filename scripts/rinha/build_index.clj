@@ -68,36 +68,42 @@
     (aset idx i (aget idx j))
     (aset idx j t)))
 
+;; Shared mutable result for DNF inner loop — build is single-threaded.
+(def ^:private -dnf-lt (long-array 1))
+(def ^:private -dnf-gt (long-array 1))
+
 (defn- quickselect!
-  "Partially sorts idx[lo..hi] so idx[target] is the target-th smallest
-   element by dimension dim in raw-vecs."
+  "3-way (Dutch National Flag) quickselect. O(N) for many equal elements.
+   Rearranges idx[lo..hi] so idx[target] is the target-th smallest on dim."
   [^ints idx ^shorts raw-vecs lo hi target dim]
-  (let [lo     (long lo)
-        hi     (long hi)
-        target (long target)
-        dim    (long dim)]
-    (loop [lo lo hi hi]
+  (let [dim    (long dim)
+        target (long target)]
+    (loop [lo (long lo) hi (long hi)]
       (when (< lo hi)
-        (let [piv-pos (+ lo (quot (- hi lo) 2))
-              piv-val (long (aget raw-vecs (unchecked-add
-                                            (unchecked-multiply (long (aget idx piv-pos)) DIMS)
-                                            dim)))]
-          (qs-swap! idx piv-pos hi)
-          (let [store (loop [i lo store lo]
-                        (if (= i hi)
-                          store
-                          (let [v (long (aget raw-vecs (unchecked-add
-                                                         (unchecked-multiply (long (aget idx i)) DIMS)
-                                                         dim)))]
-                            (if (< v piv-val)
-                              (do (qs-swap! idx store i)
-                                  (recur (inc i) (inc store)))
-                              (recur (inc i) store)))))]
-            (qs-swap! idx store hi)
+        (let [piv-val (long (aget raw-vecs
+                              (unchecked-add
+                                (unchecked-multiply
+                                  (long (aget idx (+ lo (quot (- hi lo) 2))))
+                                  DIMS)
+                                dim)))]
+          ;; Dutch National Flag: [<piv][=piv][>piv]
+          (loop [lt (long lo) i (long lo) gt (long hi)]
+            (if (> i gt)
+              (do (aset -dnf-lt 0 lt) (aset -dnf-gt 0 gt))
+              (let [v (long (aget raw-vecs
+                              (unchecked-add
+                                (unchecked-multiply (long (aget idx i)) DIMS)
+                                dim)))]
+                (cond
+                  (< v piv-val) (do (qs-swap! idx lt i) (recur (inc lt) (inc i) gt))
+                  (> v piv-val) (do (qs-swap! idx i gt) (recur lt i (dec gt)))
+                  :else         (recur lt (inc i) gt)))))
+          (let [lt (aget -dnf-lt 0)
+                gt (aget -dnf-gt 0)]
             (cond
-              (= store target) nil
-              (< target store) (recur lo (dec store))
-              :else            (recur (inc store) hi))))))))
+              (< target lt) (recur lo (dec lt))
+              (> target gt) (recur (inc gt) hi)
+              :else nil)))))))
 
 (defn- build-kdtree!
   "Fills out-vecs and out-lbls in BFS/heap order using quickselect median."
