@@ -85,6 +85,7 @@ RUN native-image \
     --features=rinha.ClojureFeature \
     --initialize-at-build-time=clojure,rinha,com.fasterxml.jackson,org.httpkit \
     -H:ConfigurationFileDirectories=/build/graal-config \
+    -march=native \
     -jar /build/rinha.jar \
     -o /build/rinha-server
 
