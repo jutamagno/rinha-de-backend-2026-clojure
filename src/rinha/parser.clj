@@ -4,13 +4,17 @@
            [java.util ArrayList]
            [java.io InputStream]))
 
-(def ^:private ^JsonFactory jf (JsonFactory.))
+; Lazy init so GraalVM native image doesn't snapshot a build-time JsonFactory.
+; AUTO_CLOSE_SOURCE=false stops Jackson from closing the http-kit InputStream.
+(def ^:private factory
+  (delay (doto (JsonFactory.)
+           (.configure com.fasterxml.jackson.core.JsonParser$Feature/AUTO_CLOSE_SOURCE false))))
 
 (defn parse-and-vectorize!
   "Parses the /fraud-score JSON payload from an InputStream using Jackson streaming.
    Extracts only the 13 fields needed by vectorize* — no map or keyword allocation."
   ^ints [^InputStream is]
-  (with-open [^JsonParser jp (.createParser jf is)]
+  (let [^JsonParser jp (.createParser ^JsonFactory @factory is)]
     (let [^doubles  tx-amount       (double-array  1)
           ^longs    tx-installments (long-array    1)
           ^objects  tx-req-at       (object-array  1)
