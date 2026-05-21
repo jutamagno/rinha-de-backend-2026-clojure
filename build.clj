@@ -9,6 +9,9 @@
   (b/delete {:path "target"})
   (b/copy-dir {:src-dirs   ["src" "resources"]
                :target-dir class-dir})
+  (b/javac {:src-dirs  ["src-java"]
+            :class-dir class-dir
+            :basis     basis})
   (b/compile-clj {:basis       basis
                   :src-dirs    ["src"]
                   :class-dir   class-dir

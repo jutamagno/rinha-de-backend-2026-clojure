@@ -1,12 +1,11 @@
 (ns rinha.build-index
-  (:import [java.io FileInputStream FileOutputStream BufferedOutputStream DataOutputStream]
+  (:import [java.io FileInputStream FileOutputStream BufferedOutputStream DataOutputStream BufferedInputStream]
+           [java.nio ByteBuffer ByteOrder]
            [java.util.zip GZIPInputStream]
            [com.fasterxml.jackson.core JsonFactory JsonToken]))
 
 (def ^:const DIMS  14)
-(def ^:const K     512)
-(def ^:const ITERS 20)
-(def ^:const MAGIC (unchecked-int 0x52494E49))  ; "RINI" v2 (IVF)
+(def ^:const MAGIC (unchecked-int 0x4B444E49))  ; "KDNI"
 
 ;; ─── Load references.json.gz ──────────────────────────────────────────────────
 
@@ -52,124 +51,123 @@
     (println "  leitura concluída:" N "vetores")
     [N vectors labels]))
 
-;; ─── K-Means ─────────────────────────────────────────────────────────────────
+;; ─── KD-tree build ────────────────────────────────────────────────────────────
 
-(defn- assign-parallel!
-  "Assigns each of N vectors to nearest centroid. Runs in parallel over threads."
-  [N ^shorts vectors ^doubles centroids ^ints assignments]
-  (let [n-cpus (.availableProcessors (Runtime/getRuntime))
-        chunk  (max 1 (quot N n-cpus))
-        tasks  (for [t (range n-cpus)]
-                 (let [s (* (long t) chunk)
-                       e (min (long N) (* (long (inc t)) chunk))]
-                   (future
-                     (loop [i s]
-                       (when (< i e)
-                         (let [vbase (* i DIMS)]
-                           (loop [ck 0  bk 0  bd Double/MAX_VALUE]
-                             (if (= ck K)
-                               (aset assignments i bk)
-                               (let [cbase (* ck DIMS)
-                                     d     (loop [j 0 acc 0.0]
-                                             (if (= j DIMS)
-                                               acc
-                                               (let [diff (- (double (aget vectors (+ vbase j)))
-                                                             (aget centroids (+ cbase j)))]
-                                                 (recur (inc j) (+ acc (* diff diff))))))]
-                                 (if (< d bd)
-                                   (recur (inc ck) ck d)
-                                   (recur (inc ck) bk bd))))))
-                         (recur (inc i)))))))]
-    (run! deref tasks)))
+(defn- ^long left-subtree-size [^long n]
+  (if (<= n 1)
+    0
+    (let [h         (- 63 (Long/numberOfLeadingZeros n))  ; floor(log2 n)
+          max-last  (bit-shift-left 1 (dec h))
+          full      (dec (bit-shift-left 1 h))
+          last-tot  (- n full)
+          last-left (min last-tot max-last)]
+      (+ (dec max-last) last-left))))
 
-(defn- update-centroids!
-  "Recomputes centroids as means of assigned vectors."
-  [N ^shorts vectors ^ints assignments ^doubles centroids]
-  (let [sums   (double-array (* K DIMS) 0.0)
-        counts (int-array K 0)]
-    (dotimes [i N]
-      (let [k     (aget assignments i)
-            vbase (* i DIMS)
-            cbase (* k DIMS)]
-        (dotimes [j DIMS]
-          (aset sums (+ cbase j)
-                (+ (aget sums (+ cbase j)) (double (aget vectors (+ vbase j))))))
-        (aset counts k (inc (aget counts k)))))
-    (dotimes [k K]
-      (let [cnt   (long (aget counts k))
-            cbase (* k DIMS)]
-        (when (pos? cnt)
-          (dotimes [j DIMS]
-            (aset centroids (+ cbase j)
-                  (/ (aget sums (+ cbase j)) (double cnt)))))))))
+(defn- qs-swap! [^ints idx ^long i ^long j]
+  (let [t (aget idx i)]
+    (aset idx i (aget idx j))
+    (aset idx j t)))
 
-(defn- kmeans! [N ^shorts vectors]
-  (println "K-Means K=" K "iters=" ITERS
-           "threads=" (.availableProcessors (Runtime/getRuntime)))
-  (let [rng         (java.util.Random. 42)
-        centroids   (double-array (* K DIMS))
-        assignments (int-array N)]
-    (dotimes [k K]
-      (let [idx   (.nextInt rng N)
-            cbase (* k DIMS)
-            vbase (* idx DIMS)]
-        (dotimes [j DIMS]
-          (aset centroids (+ cbase j) (double (aget vectors (+ vbase j)))))))
-    (dotimes [iter ITERS]
-      (let [t0 (System/currentTimeMillis)]
-        (assign-parallel! N vectors centroids assignments)
-        (update-centroids! N vectors assignments centroids)
-        (println "  iter" (inc iter) "/" ITERS
-                 (str "(" (- (System/currentTimeMillis) t0) "ms)"))))
-    [centroids assignments]))
+(defn- quickselect!
+  "Partially sorts idx[lo..hi] so idx[target] is the target-th smallest
+   element by dimension dim in raw-vecs."
+  [^ints idx ^shorts raw-vecs lo hi target dim]
+  (let [lo     (long lo)
+        hi     (long hi)
+        target (long target)
+        dim    (long dim)]
+    (loop [lo lo hi hi]
+      (when (< lo hi)
+        (let [piv-pos (+ lo (quot (- hi lo) 2))
+              piv-val (long (aget raw-vecs (unchecked-add
+                                            (unchecked-multiply (long (aget idx piv-pos)) DIMS)
+                                            dim)))]
+          (qs-swap! idx piv-pos hi)
+          (let [store (loop [i lo store lo]
+                        (if (= i hi)
+                          store
+                          (let [v (long (aget raw-vecs (unchecked-add
+                                                         (unchecked-multiply (long (aget idx i)) DIMS)
+                                                         dim)))]
+                            (if (< v piv-val)
+                              (do (qs-swap! idx store i)
+                                  (recur (inc i) (inc store)))
+                              (recur (inc i) store)))))]
+            (qs-swap! idx store hi)
+            (cond
+              (= store target) nil
+              (< target store) (recur lo (dec store))
+              :else            (recur (inc store) hi))))))))
 
-;; ─── Sort by cluster and write ────────────────────────────────────────────────
+(defn- build-kdtree!
+  "Fills out-vecs and out-lbls in BFS/heap order using quickselect median."
+  [N ^shorts raw-vecs ^bytes raw-lbls ^shorts out-vecs ^bytes out-lbls]
+  (println "Construindo KD-tree (N=" N ")...")
+  (let [indices (let [a (int-array N)] (dotimes [i N] (aset a i i)) a)
+        ;; Stack: 4 ints per entry [lo hi bfs-pos depth], max ~50 entries
+        stk     (int-array 256)
+        top     (volatile! 0)]
+    (letfn [(push! [lo hi pos depth]
+              (let [t (long @top) b (* t 4)]
+                (aset stk (int b)       (int lo))
+                (aset stk (int (+ b 1)) (int hi))
+                (aset stk (int (+ b 2)) (int pos))
+                (aset stk (int (+ b 3)) (int depth))
+                (vreset! top (inc t))))]
+      (push! 0 (dec N) 0 0)
+      (loop [cnt 0]
+        (when (pos? @top)
+          (let [t  (long (dec @top))
+                _  (vreset! top t)
+                b  (* t 4)
+                lo    (long (aget stk (int b)))
+                hi    (long (aget stk (int (+ b 1))))
+                pos   (long (aget stk (int (+ b 2))))
+                depth (long (aget stk (int (+ b 3))))
+                n     (- hi lo -1)
+                lsz   (left-subtree-size n)
+                mid   (+ lo lsz)
+                dim   (mod depth DIMS)]
+            (quickselect! indices raw-vecs lo hi mid dim)
+            (let [orig (long (aget indices mid))
+                  vb   (unchecked-multiply orig DIMS)
+                  ob   (unchecked-multiply pos  DIMS)]
+              (dotimes [j DIMS]
+                (aset out-vecs (+ ob j) (aget raw-vecs (+ vb j))))
+              (aset out-lbls (int pos) (aget raw-lbls (int orig))))
+            (when (< mid hi)
+              (push! (inc mid) hi (+ 2 (* 2 pos)) (inc depth)))
+            (when (> mid lo)
+              (push! lo (dec mid) (inc (* 2 pos)) (inc depth)))
+            (when (zero? (mod (inc cnt) 500000))
+              (println "  nós:" (inc cnt)))
+            (recur (inc cnt)))))))
+  (println "KD-tree construído."))
 
-(defn- write-index!
-  [N ^shorts vectors ^bytes labels ^doubles centroids ^ints assignments out-path]
-  (println "Ordenando vetores por cluster...")
-  (let [cl-sizes  (int-array K)
-        cl-starts (int-array K)]
-    (dotimes [i N]
-      (aset cl-sizes (aget assignments i) (inc (aget cl-sizes (aget assignments i)))))
-    (loop [k 0 pos 0]
-      (when (< k K)
-        (aset cl-starts k pos)
-        (recur (inc k) (+ pos (aget cl-sizes k)))))
-    (let [sorted-vecs   (short-array (* N DIMS))
-          sorted-labels (byte-array N)
-          cl-offsets    (aclone cl-starts)]
-      (dotimes [i N]
-        (let [k   (aget assignments i)
-              pos (long (aget cl-offsets k))
-              src (* i DIMS)
-              dst (* pos DIMS)]
-          (dotimes [j DIMS]
-            (aset sorted-vecs (+ dst j) (aget vectors (+ src j))))
-          (aset sorted-labels pos (aget labels i))
-          (aset cl-offsets k (unchecked-inc pos))))
-      (println "Escrevendo" out-path "...")
-      (with-open [dos (DataOutputStream.
-                        (BufferedOutputStream.
-                          (FileOutputStream. out-path)
-                          (* 16 1024 1024)))]
-        (.writeInt dos MAGIC)
-        (.writeInt dos N)
-        (.writeInt dos K)
-        (dotimes [i (* K DIMS)]
-          (.writeShort dos (int (Math/round (aget centroids i)))))
-        (dotimes [k K] (.writeInt dos (aget cl-starts k)))
-        (dotimes [k K] (.writeInt dos (aget cl-sizes k)))
-        (dotimes [i (* N DIMS)] (.writeShort dos (aget sorted-vecs i)))
-        (.write dos sorted-labels 0 N))
-      (println "Pronto!" out-path
-               (str "(" (.length (java.io.File. out-path)) " bytes)")))))
+;; ─── Write KDNI index ─────────────────────────────────────────────────────────
+
+(defn- write-index! [N ^shorts out-vecs ^bytes out-lbls out-path]
+  (println "Escrevendo" out-path "...")
+  (with-open [fos (FileOutputStream. out-path)
+              bos (BufferedOutputStream. fos (* 16 1024 1024))
+              dos (DataOutputStream. bos)]
+    (.writeInt dos MAGIC)
+    (.writeInt dos N)
+    (let [buf (ByteBuffer/allocate (* N DIMS 2))]
+      (.order buf ByteOrder/BIG_ENDIAN)
+      (.put (.asShortBuffer buf) out-vecs 0 (* N DIMS))
+      (.write bos (.array buf)))
+    (.write dos out-lbls 0 N))
+  (println "Pronto!" out-path
+           (str "(" (.length (java.io.File. out-path)) " bytes)")))
 
 ;; ─── Entry point ──────────────────────────────────────────────────────────────
 
 (defn -main [& args]
   (let [gz-path  (or (first args) "../rinha-de-backend-2026/resources/references.json.gz")
         out-path (or (second args) "/data/index.bin")]
-    (let [[N vectors labels] (load-references! gz-path)
-          [centroids assignments] (kmeans! N vectors)]
-      (write-index! N vectors labels centroids assignments out-path))))
+    (let [[N raw-vecs raw-lbls] (load-references! gz-path)
+          out-vecs (short-array (* N DIMS))
+          out-lbls (byte-array N)]
+      (build-kdtree! N raw-vecs raw-lbls out-vecs out-lbls)
+      (write-index! N out-vecs out-lbls out-path))))

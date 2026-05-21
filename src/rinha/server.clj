@@ -23,7 +23,7 @@
         {:status  200
          :headers {"Content-Type" "application/json"}
          :body    (json/generate-string
-                    {:approved    (< score 0.6)
+                    {:approved    (<= score 0.2)
                      :fraud_score (double score)})})
       (catch Exception _
         ;; Retorna aprovado como fallback (peso FP=1 < peso Err=5)

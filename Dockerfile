@@ -29,6 +29,7 @@ RUN clojure -P && clojure -P -T:build
 
 ARG CACHEBUST=1
 COPY src/       src/
+COPY src-java/  src-java/
 COPY resources/ resources/
 
 RUN clojure -T:build uber
